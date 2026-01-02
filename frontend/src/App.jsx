@@ -21,11 +21,11 @@ function Navigation() {
   }
 
   const navItems = [
-    { path: '/', label: 'Dashboard', icon: '📊' },
-    { path: '/devices', label: 'Điều khiển', icon: '🎛️' },
-    { path: '/scenarios', label: 'Kịch bản', icon: '⚙️' },
-    { path: '/predictions', label: 'Dự báo', icon: '🔮' },
-    { path: '/logs', label: 'Log hệ thống', icon: '📝' },
+    { path: '/', label: 'Dashboard', icon: '' },
+    { path: '/devices', label: 'Điều khiển', icon: '' },
+    { path: '/scenarios', label: 'Kịch bản', icon: '' },
+    { path: '/predictions', label: 'Dự báo', icon: '' },
+    { path: '/logs', label: 'Log hệ thống', icon: '' },
   ];
 
   const handleLogout = async () => {

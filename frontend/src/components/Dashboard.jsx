@@ -8,6 +8,7 @@ const Dashboard = () => {
   const [latestData, setLatestData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState(7); // days
+  const [showFullTable, setShowFullTable] = useState(false); // Hiển thị full table hay chỉ 5 gần nhất
 
   useEffect(() => {
     fetchSensorData();
@@ -68,12 +69,17 @@ const Dashboard = () => {
   };
 
   // Process latest telemetry data from ThingsBoard format
+  // Values are strings from API: "13", "66", "100"
   const processLatestTelemetry = (data) => {
     const now = new Date();
+    const soilMoistureValue = data[DEVICE_CONFIG.telemetryKeys.soilMoisture]?.[0]?.value;
+    const temperatureValue = data[DEVICE_CONFIG.telemetryKeys.airTemperature]?.[0]?.value;
+    const humidityValue = data[DEVICE_CONFIG.telemetryKeys.airHumidity]?.[0]?.value;
+    
     return {
-      soilMoisture: data[DEVICE_CONFIG.telemetryKeys.soilMoisture]?.[0]?.value || 0,
-      airTemperature: data[DEVICE_CONFIG.telemetryKeys.airTemperature]?.[0]?.value || 0,
-      airHumidity: data[DEVICE_CONFIG.telemetryKeys.airHumidity]?.[0]?.value || 0,
+      soilMoisture: parseFloat(soilMoistureValue) || 0,
+      airTemperature: parseFloat(temperatureValue) || 0,
+      airHumidity: parseFloat(humidityValue) || 0,
       time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       date: now.toLocaleDateString('vi-VN'),
     };
@@ -103,9 +109,9 @@ const Dashboard = () => {
         timestamp: ts,
         time: date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
         date: date.toLocaleDateString('vi-VN'),
-        soilMoisture: soilPoint?.value || null,
-        airTemperature: tempPoint?.value || null,
-        airHumidity: humidityPoint?.value || null,
+        soilMoisture: soilPoint?.value ? parseFloat(soilPoint.value) : null,
+        airTemperature: tempPoint?.value ? parseFloat(tempPoint.value) : null,
+        airHumidity: humidityPoint?.value ? parseFloat(humidityPoint.value) : null,
       });
     });
 
@@ -319,7 +325,17 @@ const Dashboard = () => {
 
       {/* Data Table */}
       <div className="bg-white p-6 rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800">Bảng dữ liệu chi tiết</h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-gray-800">Bảng dữ liệu chi tiết</h2>
+          {!loading && sensorData.length > 5 && (
+            <button
+              onClick={() => setShowFullTable(!showFullTable)}
+              className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+            >
+              {showFullTable ? 'Hiện 5 gần nhất' : `Hiện tất cả (${sensorData.length})`}
+            </button>
+          )}
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -352,7 +368,10 @@ const Dashboard = () => {
                   </td>
                 </tr>
               ) : (
-                sensorData.slice().reverse().map((data, index) => (
+                (showFullTable 
+                  ? sensorData.slice().reverse() 
+                  : sensorData.slice().reverse().slice(0, 5)
+                ).map((data, index) => (
                   <tr key={index} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {data.date} {data.time}

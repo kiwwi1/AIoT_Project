@@ -120,9 +120,9 @@ const SystemLogs = () => {
         timestamp: ts,
         time: date.toLocaleTimeString('vi-VN'),
         date: date.toLocaleDateString('vi-VN'),
-        soilMoisture: soilPoint?.value || null,
-        airTemperature: tempPoint?.value || null,
-        airHumidity: humidityPoint?.value || null,
+        soilMoisture: soilPoint?.value ? parseFloat(soilPoint.value) : null,
+        airTemperature: tempPoint?.value ? parseFloat(tempPoint.value) : null,
+        airHumidity: humidityPoint?.value ? parseFloat(humidityPoint.value) : null,
       });
     });
 

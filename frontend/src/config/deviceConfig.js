@@ -8,14 +8,16 @@ export const DEVICE_CONFIG = {
   // Device ID từ ThingsBoard (cần thay bằng ID thực tế)
   // Có thể lấy từ ThingsBoard UI hoặc API
   deviceId: 'YOUR_DEVICE_ID_HERE',
+  entityId: 'YOUR_ENTITY_ID_HERE',
   
-  // Telemetry keys từ cảm biến
+  // Telemetry keys từ cảm biến (theo format từ API response)
   telemetryKeys: {
-    soilMoisture: 'soilMoisture',      // Độ ẩm đất
-    airTemperature: 'airTemperature',  // Nhiệt độ không khí
-    airHumidity: 'airHumidity',         // Độ ẩm không khí
-    pumpStatus: 'pumpStatus',           // Trạng thái máy bơm
-    heaterStatus: 'heaterStatus',       // Trạng thái đèn sưởi
+    soilMoisture: 'soil_moisture',      // Độ ẩm đất
+    airTemperature: 'temperature',      // Nhiệt độ không khí
+    airHumidity: 'humidity',             // Độ ẩm không khí
+    pumpStatus: 'pump_status',           // Trạng thái máy bơm
+    lampStatus: 'lamp_status',           // Trạng thái đèn (ON/OFF)
+    lampMode: 'lamp_mode',               // Chế độ đèn (AUTO/MANUAL)
     temperaturePrediction: 'temperaturePrediction', // Dự báo nhiệt độ
   },
   

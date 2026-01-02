@@ -80,21 +80,48 @@ export const deviceAPI = {
   getDeviceInfo: (deviceId) =>
     api.get(`/api/device/info/${deviceId}`),
   
+  // Get devices by customer ID
+  // params: { pageSize, page, type, textSearch, sortProperty, sortOrder }
+  getCustomerDevices: (customerId, params = {}) => {
+    const {
+      pageSize = 10,
+      page = 0,
+      type = '',
+      textSearch = '',
+      sortProperty = 'name',
+      sortOrder = 'ASC'
+    } = params;
+    
+    return api.get(`/api/customer/${customerId}/devices`, {
+      params: {
+        pageSize,
+        page,
+        type,
+        textSearch,
+        sortProperty,
+        sortOrder
+      }
+    });
+  },
+  
   // Send one-way RPC command to device (điều khiển máy bơm, đèn sưởi)
-  // method: 'setPump', 'setHeater', etc.
-  // params: { action: 'on' } hoặc { action: 'off' }
-  sendRPC: (deviceId, method, params, timeout = 10000) =>
-    api.post(`/api/plugins/rpc/oneway/${deviceId}`, {
+  // method: 'setPump', 'setHeater', 'setLamp', etc.
+  // params: { action: 'on' } hoặc { action: 'off' } hoặc { state: true }
+  // persistent: false, timeout: 5000 (default)
+  sendRPC: (deviceId, method, params, persistent = false, timeout = 5000) =>
+    api.post(`/api/rpc/oneway/${deviceId}`, {
       method,
       params,
+      persistent,
       timeout
     }),
   
   // Send two-way RPC (có response từ device)
-  sendRPCWithResponse: (deviceId, method, params, timeout = 10000) =>
-    api.post(`/api/plugins/rpc/twoway/${deviceId}`, {
+  sendRPCWithResponse: (deviceId, method, params, persistent = false, timeout = 10000) =>
+    api.post(`/api/rpc/twoway/${deviceId}`, {
       method,
       params,
+      persistent,
       timeout
     }),
   

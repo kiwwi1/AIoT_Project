@@ -56,8 +56,8 @@ const TemperaturePrediction = () => {
       processed.push({
         hour: date.getHours(),
         time: date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-        predicted: point.value?.toFixed(1) || null,
-        actual: actualPoint?.value?.toFixed(1) || null,
+        predicted: point.value ? parseFloat(point.value).toFixed(1) : null,
+        actual: actualPoint?.value ? parseFloat(actualPoint.value).toFixed(1) : null,
       });
     });
     
