@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { deviceAPI } from '../services/api';
+import { deviceAPI, sensorAPI } from '../services/api';
+import { DEVICE_CONFIG, getDeviceId } from '../config/deviceConfig';
 
 const DeviceControl = () => {
   const [deviceStatus, setDeviceStatus] = useState({
@@ -17,12 +18,30 @@ const DeviceControl = () => {
 
   const fetchDeviceStatus = async () => {
     try {
-      const response = await deviceAPI.getDeviceStatus();
-      setDeviceStatus(response.data || { pump: false, heater: false });
+      const deviceId = getDeviceId();
+      const entityType = DEVICE_CONFIG.entityType;
+      
+      // Get device status from telemetry (pumpStatus, heaterStatus)
+      const keys = [
+        DEVICE_CONFIG.telemetryKeys.pumpStatus,
+        DEVICE_CONFIG.telemetryKeys.heaterStatus,
+      ];
+      
+      const response = await sensorAPI.getLatestTelemetry(entityType, deviceId, keys);
+      const data = response.data || {};
+      
+      // Extract status values (assuming boolean or 'on'/'off' string)
+      const pumpValue = data[DEVICE_CONFIG.telemetryKeys.pumpStatus]?.[0]?.value;
+      const heaterValue = data[DEVICE_CONFIG.telemetryKeys.heaterStatus]?.[0]?.value;
+      
+      setDeviceStatus({
+        pump: pumpValue === true || pumpValue === 'on' || pumpValue === 1,
+        heater: heaterValue === true || heaterValue === 'on' || heaterValue === 1,
+      });
     } catch (error) {
       console.error('Error fetching device status:', error);
-      // Mock data for development
-      setDeviceStatus({ pump: false, heater: false });
+      // Keep current status or set default
+      setDeviceStatus(prev => prev);
     }
   };
 
@@ -30,9 +49,17 @@ const DeviceControl = () => {
     try {
       setLoading(true);
       setMessage('');
-      await deviceAPI.controlPump(action);
+      const deviceId = getDeviceId();
+      const method = DEVICE_CONFIG.rpcMethods.setPump;
+      const params = { action }; // { action: 'on' } or { action: 'off' }
+      
+      await deviceAPI.sendRPC(deviceId, method, params);
       setMessage(`Máy bơm đã được ${action === 'on' ? 'BẬT' : 'TẮT'}`);
-      await fetchDeviceStatus();
+      
+      // Wait a bit then refresh status
+      setTimeout(() => {
+        fetchDeviceStatus();
+      }, 1000);
     } catch (error) {
       console.error('Error controlling pump:', error);
       setMessage('Lỗi khi điều khiển máy bơm');
@@ -46,9 +73,17 @@ const DeviceControl = () => {
     try {
       setLoading(true);
       setMessage('');
-      await deviceAPI.controlHeater(action);
+      const deviceId = getDeviceId();
+      const method = DEVICE_CONFIG.rpcMethods.setHeater;
+      const params = { action }; // { action: 'on' } or { action: 'off' }
+      
+      await deviceAPI.sendRPC(deviceId, method, params);
       setMessage(`Đèn sưởi đã được ${action === 'on' ? 'BẬT' : 'TẮT'}`);
-      await fetchDeviceStatus();
+      
+      // Wait a bit then refresh status
+      setTimeout(() => {
+        fetchDeviceStatus();
+      }, 1000);
     } catch (error) {
       console.error('Error controlling heater:', error);
       setMessage('Lỗi khi điều khiển đèn sưởi');

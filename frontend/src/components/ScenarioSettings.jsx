@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { scenarioAPI } from '../services/api';
+import { DEVICE_CONFIG, getDeviceId } from '../config/deviceConfig';
 
 const ScenarioSettings = () => {
   const [thresholds, setThresholds] = useState({
@@ -21,9 +22,22 @@ const ScenarioSettings = () => {
   const fetchThresholds = async () => {
     try {
       setLoading(true);
-      const response = await scenarioAPI.getThresholds();
+      const deviceId = getDeviceId();
+      const entityType = DEVICE_CONFIG.entityType;
+      
+      const response = await scenarioAPI.getThresholds(entityType, deviceId);
+      
       if (response.data) {
-        setThresholds(response.data);
+        // ThingsBoard returns attributes as an object
+        const attrs = response.data;
+        setThresholds({
+          soilMoistureMin: attrs.soilMoistureMin || 30,
+          soilMoistureMax: attrs.soilMoistureMax || 80,
+          temperatureMin: attrs.temperatureMin || 18,
+          temperatureMax: attrs.temperatureMax || 30,
+          humidityMin: attrs.humidityMin || 40,
+          humidityMax: attrs.humidityMax || 80,
+        });
       }
     } catch (error) {
       console.error('Error fetching thresholds:', error);
@@ -44,7 +58,10 @@ const ScenarioSettings = () => {
     try {
       setSaving(true);
       setMessage('');
-      await scenarioAPI.updateThresholds(thresholds);
+      const deviceId = getDeviceId();
+      const entityType = DEVICE_CONFIG.entityType;
+      
+      await scenarioAPI.updateThresholds(entityType, deviceId, thresholds);
       setMessage('Đã lưu cài đặt kịch bản thành công!');
     } catch (error) {
       console.error('Error saving thresholds:', error);
@@ -258,7 +275,7 @@ const ScenarioSettings = () => {
           {/* Alert Information */}
           <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
             <div className="flex">
-              <div className="flex-shrink-0">
+              <div className="shrink-0">
                 <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                 </svg>

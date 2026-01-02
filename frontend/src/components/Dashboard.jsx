@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { sensorAPI } from '../services/api';
+import { DEVICE_CONFIG, getDeviceId } from '../config/deviceConfig';
 
 const Dashboard = () => {
   const [sensorData, setSensorData] = useState([]);
+  const [latestData, setLatestData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState(7); // days
 
@@ -16,15 +18,98 @@ const Dashboard = () => {
   const fetchSensorData = async () => {
     try {
       setLoading(true);
-      const response = await sensorAPI.getSensorHistory(timeRange);
-      setSensorData(response.data || []);
+      const deviceId = getDeviceId();
+      const entityType = DEVICE_CONFIG.entityType;
+      const keys = [
+        DEVICE_CONFIG.telemetryKeys.soilMoisture,
+        DEVICE_CONFIG.telemetryKeys.airTemperature,
+        DEVICE_CONFIG.telemetryKeys.airHumidity,
+      ];
+
+      // Calculate time range
+      const endTs = Date.now();
+      const startTs = endTs - (timeRange * 24 * 60 * 60 * 1000);
+
+      // Get latest values
+      const latestResponse = await sensorAPI.getLatestTelemetry(entityType, deviceId, keys);
+      
+      // Get history
+      const historyResponse = await sensorAPI.getTelemetryHistory(
+        entityType,
+        deviceId,
+        keys,
+        startTs,
+        endTs,
+        3600000 // 1 hour interval
+      );
+
+      // Process latest data
+      if (latestResponse.data) {
+        const latest = processLatestTelemetry(latestResponse.data);
+        setLatestData(latest);
+      }
+
+      // Process history data
+      if (historyResponse.data) {
+        const processed = processTelemetryHistory(historyResponse.data, keys);
+        setSensorData(processed);
+      } else {
+        setSensorData(generateMockData());
+      }
     } catch (error) {
       console.error('Error fetching sensor data:', error);
       // Mock data for development
-      setSensorData(generateMockData());
+      const mockData = generateMockData();
+      setSensorData(mockData);
+      setLatestData(mockData.length > 0 ? mockData[mockData.length - 1] : null);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Process latest telemetry data from ThingsBoard format
+  const processLatestTelemetry = (data) => {
+    const now = new Date();
+    return {
+      soilMoisture: data[DEVICE_CONFIG.telemetryKeys.soilMoisture]?.[0]?.value || 0,
+      airTemperature: data[DEVICE_CONFIG.telemetryKeys.airTemperature]?.[0]?.value || 0,
+      airHumidity: data[DEVICE_CONFIG.telemetryKeys.airHumidity]?.[0]?.value || 0,
+      time: now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      date: now.toLocaleDateString('vi-VN'),
+    };
+  };
+
+  // Process telemetry history data from ThingsBoard format
+  const processTelemetryHistory = (data, keys) => {
+    const processed = [];
+    const soilMoisture = data[DEVICE_CONFIG.telemetryKeys.soilMoisture] || [];
+    const airTemperature = data[DEVICE_CONFIG.telemetryKeys.airTemperature] || [];
+    const airHumidity = data[DEVICE_CONFIG.telemetryKeys.airHumidity] || [];
+
+    // Get all timestamps
+    const allTimestamps = new Set();
+    [soilMoisture, airTemperature, airHumidity].forEach(series => {
+      series.forEach(point => allTimestamps.add(point.ts));
+    });
+
+    // Combine data by timestamp
+    Array.from(allTimestamps).sort().forEach(ts => {
+      const date = new Date(ts);
+      const soilPoint = soilMoisture.find(p => p.ts === ts);
+      const tempPoint = airTemperature.find(p => p.ts === ts);
+      const humidityPoint = airHumidity.find(p => p.ts === ts);
+
+      processed.push({
+        timestamp: ts,
+        time: date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        date: date.toLocaleDateString('vi-VN'),
+        soilMoisture: soilPoint?.value || null,
+        airTemperature: tempPoint?.value || null,
+        airHumidity: humidityPoint?.value || null,
+      });
+    });
+
+    return processed;
   };
 
   const generateMockData = () => {
@@ -44,7 +129,6 @@ const Dashboard = () => {
     return data;
   };
 
-  const latestData = sensorData.length > 0 ? sensorData[sensorData.length - 1] : null;
 
   return (
     <div className="p-6 space-y-6">

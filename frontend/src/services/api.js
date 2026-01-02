@@ -9,72 +9,251 @@ const api = axios.create({
   },
 });
 
-// API functions for sensor data
+// Thêm interceptor để xử lý authentication
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers['X-Authorization'] = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Thêm interceptor để xử lý response errors (401 = unauthorized)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid, redirect to login
+      localStorage.removeItem('token');
+      localStorage.removeItem('userInfo');
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// API functions for sensor data (Telemetry)
 export const sensorAPI = {
-  // Get soil moisture data
-  getSoilMoisture: () => api.get('/api/sensors/soil-moisture'),
+  // Get latest telemetry values (time series)
+  // entityType: 'DEVICE', entityId: deviceId
+  // keys: 'soilMoisture,airTemperature,airHumidity' hoặc array
+  getLatestTelemetry: (entityType, entityId, keys) => {
+    const keysParam = Array.isArray(keys) ? keys.join(',') : keys;
+    return api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
+      params: { keys: keysParam, useStrictDataTypes: false }
+    });
+  },
   
-  // Get air temperature and humidity data
-  getAirData: () => api.get('/api/sensors/air'),
+  // Get telemetry history with time range
+  getTelemetryHistory: (entityType, entityId, keys, startTs, endTs, interval = 3600000) => {
+    const keysParam = Array.isArray(keys) ? keys.join(',') : keys;
+    return api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
+      params: { 
+        keys: keysParam,
+        startTs,
+        endTs,
+        interval,
+        intervalType: 'MILLISECONDS',
+        useStrictDataTypes: false
+      }
+    });
+  },
   
-  // Get all sensor data
-  getAllSensorData: () => api.get('/api/sensors'),
+  // Get all time series keys for an entity
+  getTelemetryKeys: (entityType, entityId) =>
+    api.get(`/api/plugins/telemetry/${entityType}/${entityId}/keys/timeseries`),
   
-  // Get sensor data history
-  getSensorHistory: (days = 7) => api.get(`/api/sensors/history?days=${days}`),
+  // Save telemetry data (nếu cần gửi dữ liệu từ frontend)
+  saveTelemetry: (entityType, entityId, scope, data) =>
+    api.post(`/api/plugins/telemetry/${entityType}/${entityId}/timeseries/${scope}`, data),
 };
 
 // API functions for device control
 export const deviceAPI = {
-  // Get device status
-  getDeviceStatus: () => api.get('/api/devices/status'),
+  // Get device by ID
+  getDevice: (deviceId) =>
+    api.get(`/api/device/${deviceId}`),
   
-  // Control water pump
-  controlPump: (action) => api.post('/api/devices/pump', { action }), // action: 'on' or 'off'
+  // Get device info
+  getDeviceInfo: (deviceId) =>
+    api.get(`/api/device/info/${deviceId}`),
   
-  // Control heater lamp
-  controlHeater: (action) => api.post('/api/devices/heater', { action }), // action: 'on' or 'off'
+  // Send one-way RPC command to device (điều khiển máy bơm, đèn sưởi)
+  // method: 'setPump', 'setHeater', etc.
+  // params: { action: 'on' } hoặc { action: 'off' }
+  sendRPC: (deviceId, method, params, timeout = 10000) =>
+    api.post(`/api/plugins/rpc/oneway/${deviceId}`, {
+      method,
+      params,
+      timeout
+    }),
   
-  // Get device history
-  getDeviceHistory: (days = 7) => api.get(`/api/devices/history?days=${days}`),
+  // Send two-way RPC (có response từ device)
+  sendRPCWithResponse: (deviceId, method, params, timeout = 10000) =>
+    api.post(`/api/plugins/rpc/twoway/${deviceId}`, {
+      method,
+      params,
+      timeout
+    }),
+  
+  // Get device attributes (SERVER_SCOPE, CLIENT_SCOPE, SHARED_SCOPE)
+  getDeviceAttributes: (entityType, entityId, scope = 'SERVER_SCOPE', keys = null) => {
+    const params = keys ? { keys: Array.isArray(keys) ? keys.join(',') : keys } : {};
+    return api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/attributes/${scope}`, {
+      params
+    });
+  },
+  
+  // Set device attributes (có thể dùng để lưu thresholds)
+  setDeviceAttributes: (entityType, entityId, scope = 'SERVER_SCOPE', attributes) =>
+    api.post(`/api/plugins/telemetry/${entityType}/${entityId}/attributes/${scope}`, attributes),
+  
+  // Delete device attributes
+  deleteDeviceAttributes: (entityType, entityId, scope, keys = null) => {
+    const params = keys ? { keys: Array.isArray(keys) ? keys.join(',') : keys } : {};
+    return api.delete(`/api/plugins/telemetry/${entityType}/${entityId}/${scope}`, {
+      params
+    });
+  },
 };
 
-// API functions for scenarios/thresholds
+// API functions for scenarios/thresholds (sử dụng Device Attributes)
 export const scenarioAPI = {
-  // Get current thresholds
-  getThresholds: () => api.get('/api/scenarios/thresholds'),
+  // Get thresholds from device server attributes
+  getThresholds: (entityType, entityId) =>
+    api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/attributes/SERVER_SCOPE`, {
+      params: { 
+        keys: 'soilMoistureMin,soilMoistureMax,temperatureMin,temperatureMax,humidityMin,humidityMax'
+      }
+    }),
   
-  // Update thresholds
-  updateThresholds: (thresholds) => api.put('/api/scenarios/thresholds', thresholds),
+  // Update thresholds (lưu vào device server attributes)
+  updateThresholds: (entityType, entityId, thresholds) =>
+    api.post(`/api/plugins/telemetry/${entityType}/${entityId}/attributes/SERVER_SCOPE`, thresholds),
   
-  // Get scenario history
-  getScenarioHistory: (days = 7) => api.get(`/api/scenarios/history?days=${days}`),
+  // Get all attribute keys
+  getAttributeKeys: (entityType, entityId, scope = 'SERVER_SCOPE') =>
+    api.get(`/api/plugins/telemetry/${entityType}/${entityId}/keys/attributes/${scope}`),
 };
 
-// API functions for predictions
+// API functions for predictions (sử dụng Telemetry)
 export const predictionAPI = {
-  // Get temperature predictions
-  getPredictions: () => api.get('/api/predictions/temperature'),
+  // Get temperature predictions (giả sử có key 'temperaturePrediction' trong telemetry)
+  getPredictions: (entityType, entityId) =>
+    api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
+      params: { keys: 'temperaturePrediction', useStrictDataTypes: false }
+    }),
   
   // Get prediction history
-  getPredictionHistory: (days = 7) => api.get(`/api/predictions/history?days=${days}`),
+  getPredictionHistory: (entityType, entityId, startTs, endTs) =>
+    api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
+      params: { 
+        keys: 'temperaturePrediction',
+        startTs,
+        endTs,
+        interval: 3600000,
+        intervalType: 'MILLISECONDS',
+        useStrictDataTypes: false
+      }
+    }),
 };
 
-// API functions for logs
+// API functions for logs (Audit Log)
 export const logAPI = {
-  // Get system logs
-  getLogs: (days = 7) => api.get(`/api/logs?days=${days}`),
+  // Get all audit logs
+  getAuditLogs: (params = {}) => {
+    const {
+      pageSize = 100,
+      page = 0,
+      textSearch = '',
+      sortProperty = 'createdTime',
+      sortOrder = 'DESC',
+      startTime,
+      endTime,
+      actionTypes
+    } = params;
+    
+    return api.get(`/api/audit/logs`, {
+      params: {
+        pageSize,
+        page,
+        textSearch,
+        sortProperty,
+        sortOrder,
+        startTime,
+        endTime,
+        actionTypes
+      }
+    });
+  },
   
-  // Get sensor logs
-  getSensorLogs: (days = 7) => api.get(`/api/logs/sensors?days=${days}`),
+  // Get audit logs by entity (device)
+  getDeviceLogs: (entityType, entityId, params = {}) => {
+    const {
+      pageSize = 100,
+      page = 0,
+      textSearch = '',
+      sortProperty = 'createdTime',
+      sortOrder = 'DESC',
+      startTime,
+      endTime,
+      actionTypes
+    } = params;
+    
+    return api.get(`/api/audit/logs/entity/${entityType}/${entityId}`, {
+      params: {
+        pageSize,
+        page,
+        textSearch,
+        sortProperty,
+        sortOrder,
+        startTime,
+        endTime,
+        actionTypes
+      }
+    });
+  },
   
-  // Get device logs
-  getDeviceLogs: (days = 7) => api.get(`/api/logs/devices?days=${days}`),
+  // Get audit logs by user
+  getUserLogs: (userId, params = {}) => {
+    const {
+      pageSize = 100,
+      page = 0,
+      textSearch = '',
+      sortProperty = 'createdTime',
+      sortOrder = 'DESC',
+      startTime,
+      endTime,
+      actionTypes
+    } = params;
+    
+    return api.get(`/api/audit/logs/user/${userId}`, {
+      params: {
+        pageSize,
+        page,
+        textSearch,
+        sortProperty,
+        sortOrder,
+        startTime,
+        endTime,
+        actionTypes
+      }
+    });
+  },
+};
+
+// Authentication (nếu cần)
+export const authAPI = {
+  login: (username, password) =>
+    api.post(`/api/auth/login`, { username, password }),
   
-  // Get user command logs
-  getUserLogs: (days = 7) => api.get(`/api/logs/users?days=${days}`),
+  logout: () =>
+    api.post(`/api/auth/logout`),
+  
+  refreshToken: (refreshToken) =>
+    api.post(`/api/auth/token`, { refreshToken }),
 };
 
 export default api;
-
-

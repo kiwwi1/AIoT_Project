@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { logAPI } from '../services/api';
+import { logAPI, sensorAPI } from '../services/api';
+import { DEVICE_CONFIG, getDeviceId } from '../config/deviceConfig';
 
 const SystemLogs = () => {
   const [logs, setLogs] = useState({
@@ -18,19 +19,68 @@ const SystemLogs = () => {
   const fetchLogs = async () => {
     try {
       setLoading(true);
+      const deviceId = getDeviceId();
+      const entityType = DEVICE_CONFIG.entityType;
+      
+      // Calculate time range
+      const endTime = Date.now();
+      const startTime = endTime - (timeRange * 24 * 60 * 60 * 1000);
+      
       let response;
       switch (activeTab) {
         case 'sensors':
-          response = await logAPI.getSensorLogs(timeRange);
-          setLogs(prev => ({ ...prev, sensors: response.data || [] }));
+          // Get sensor telemetry history
+          const keys = [
+            DEVICE_CONFIG.telemetryKeys.soilMoisture,
+            DEVICE_CONFIG.telemetryKeys.airTemperature,
+            DEVICE_CONFIG.telemetryKeys.airHumidity,
+          ];
+          const sensorResponse = await sensorAPI.getTelemetryHistory(
+            entityType,
+            deviceId,
+            keys,
+            startTime,
+            endTime,
+            1800000 // 30 minutes interval
+          );
+          const processed = processSensorLogs(sensorResponse.data || {});
+          setLogs(prev => ({ ...prev, sensors: processed }));
           break;
         case 'devices':
-          response = await logAPI.getDeviceLogs(timeRange);
-          setLogs(prev => ({ ...prev, devices: response.data || [] }));
+          // Get device audit logs
+          response = await logAPI.getDeviceLogs(entityType, deviceId, {
+            startTime,
+            endTime,
+            pageSize: 100,
+            page: 0,
+          });
+          const deviceLogs = processDeviceLogs(response.data?.data || []);
+          setLogs(prev => ({ ...prev, devices: deviceLogs }));
           break;
         case 'users':
-          response = await logAPI.getUserLogs(timeRange);
-          setLogs(prev => ({ ...prev, users: response.data || [] }));
+          // Get user audit logs (need userId - can be from localStorage or API)
+          const userId = localStorage.getItem('userId') || null;
+          if (userId) {
+            response = await logAPI.getUserLogs(userId, {
+              startTime,
+              endTime,
+              pageSize: 100,
+              page: 0,
+            });
+            const userLogs = processUserLogs(response.data?.data || []);
+            setLogs(prev => ({ ...prev, users: userLogs }));
+          } else {
+            // Get all audit logs and filter for user actions
+            response = await logAPI.getAuditLogs({
+              startTime,
+              endTime,
+              pageSize: 100,
+              page: 0,
+              actionTypes: 'RPC_CALL',
+            });
+            const userLogs = processUserLogs(response.data?.data || []);
+            setLogs(prev => ({ ...prev, users: userLogs }));
+          }
           break;
         default:
           break;
@@ -45,6 +95,77 @@ const SystemLogs = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Process sensor logs from telemetry data
+  const processSensorLogs = (data) => {
+    const processed = [];
+    const soilMoisture = data[DEVICE_CONFIG.telemetryKeys.soilMoisture] || [];
+    const airTemperature = data[DEVICE_CONFIG.telemetryKeys.airTemperature] || [];
+    const airHumidity = data[DEVICE_CONFIG.telemetryKeys.airHumidity] || [];
+
+    const allTimestamps = new Set();
+    [soilMoisture, airTemperature, airHumidity].forEach(series => {
+      series.forEach(point => allTimestamps.add(point.ts));
+    });
+
+    Array.from(allTimestamps).sort().forEach((ts, index) => {
+      const date = new Date(ts);
+      const soilPoint = soilMoisture.find(p => p.ts === ts);
+      const tempPoint = airTemperature.find(p => p.ts === ts);
+      const humidityPoint = airHumidity.find(p => p.ts === ts);
+
+      processed.push({
+        id: index + 1,
+        timestamp: ts,
+        time: date.toLocaleTimeString('vi-VN'),
+        date: date.toLocaleDateString('vi-VN'),
+        soilMoisture: soilPoint?.value || null,
+        airTemperature: tempPoint?.value || null,
+        airHumidity: humidityPoint?.value || null,
+      });
+    });
+
+    return processed;
+  };
+
+  // Process device logs from audit log
+  const processDeviceLogs = (auditLogs) => {
+    return auditLogs.map((log, index) => {
+      const date = new Date(log.createdTime);
+      // Parse action data to extract device and action
+      const actionData = log.actionData || {};
+      const device = actionData.device || 'unknown';
+      const action = actionData.action || log.actionType || 'unknown';
+      
+      return {
+        id: log.id?.id || index + 1,
+        timestamp: log.createdTime,
+        time: date.toLocaleTimeString('vi-VN'),
+        date: date.toLocaleDateString('vi-VN'),
+        device: device.includes('pump') ? 'pump' : 'heater',
+        action: action.toLowerCase().includes('on') ? 'on' : 'off',
+        status: log.actionStatus === 'SUCCESS' ? 'success' : 'info',
+      };
+    });
+  };
+
+  // Process user logs from audit log
+  const processUserLogs = (auditLogs) => {
+    return auditLogs.map((log, index) => {
+      const date = new Date(log.createdTime);
+      const actionData = log.actionData || {};
+      
+      return {
+        id: log.id?.id || index + 1,
+        timestamp: log.createdTime,
+        time: date.toLocaleTimeString('vi-VN'),
+        date: date.toLocaleDateString('vi-VN'),
+        command: actionData.method || log.actionType || 'unknown',
+        user: log.userName || 'admin',
+        result: log.actionStatus === 'SUCCESS' ? 'success' : 'failure',
+      };
+    });
   };
 
   const generateMockLogs = (type) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { predictionAPI } from '../services/api';
+import { DEVICE_CONFIG, getDeviceId } from '../config/deviceConfig';
 
 const TemperaturePrediction = () => {
   const [predictions, setPredictions] = useState([]);
@@ -15,8 +16,17 @@ const TemperaturePrediction = () => {
   const fetchPredictions = async () => {
     try {
       setLoading(true);
-      const response = await predictionAPI.getPredictions();
-      setPredictions(response.data || []);
+      const deviceId = getDeviceId();
+      const entityType = DEVICE_CONFIG.entityType;
+      
+      const response = await predictionAPI.getPredictions(entityType, deviceId);
+      
+      if (response.data) {
+        const processed = processPredictions(response.data);
+        setPredictions(processed);
+      } else {
+        setPredictions(generateMockPredictions());
+      }
     } catch (error) {
       console.error('Error fetching predictions:', error);
       // Mock data for development
@@ -24,6 +34,39 @@ const TemperaturePrediction = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Process predictions from telemetry data
+  const processPredictions = (data) => {
+    const predictionKey = DEVICE_CONFIG.telemetryKeys.temperaturePrediction;
+    const predictionData = data[predictionKey] || [];
+    
+    // Also get actual temperature for comparison
+    const actualTempKey = DEVICE_CONFIG.telemetryKeys.airTemperature;
+    const actualData = data[actualTempKey] || [];
+    
+    const processed = [];
+    const now = new Date();
+    
+    // Process prediction data (assuming it contains future predictions)
+    predictionData.forEach((point, index) => {
+      const date = new Date(point.ts);
+      const actualPoint = actualData.find(p => Math.abs(p.ts - point.ts) < 3600000); // Within 1 hour
+      
+      processed.push({
+        hour: date.getHours(),
+        time: date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        predicted: point.value?.toFixed(1) || null,
+        actual: actualPoint?.value?.toFixed(1) || null,
+      });
+    });
+    
+    // If no predictions, generate mock
+    if (processed.length === 0) {
+      return generateMockPredictions();
+    }
+    
+    return processed;
   };
 
   const generateMockPredictions = () => {
