@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI } from '../services/api';
+import { decodeJWT, getCustomerIdFromToken, getUserIdFromToken } from '../utils/tokenUtils';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -24,13 +25,32 @@ const Login = () => {
         // Save token to localStorage
         localStorage.setItem('token', token);
         
-        // Save user info if available
-        if (response.data) {
-          localStorage.setItem('userInfo', JSON.stringify({
-            username: response.data.username || username,
-            userId: response.data.userId?.id || null,
-          }));
+        // Decode token to get user information
+        const tokenData = decodeJWT(token);
+        
+        // Extract customerId and userId from token
+        const customerId = tokenData?.customerId || tokenData?.customer_id || null;
+        const userId = tokenData?.userId || tokenData?.user_id || tokenData?.sub || null;
+        
+        // Save user info
+        const userInfo = {
+          username: response.data?.username || username,
+          userId: userId || response.data?.userId?.id || null,
+          customerId: customerId || response.data?.customerId?.id || null,
+          tokenData: tokenData, // Save full token data for debugging
+        };
+        
+        localStorage.setItem('userInfo', JSON.stringify(userInfo));
+        
+        // Also save customerId separately for easy access
+        if (customerId) {
+          localStorage.setItem('customerId', customerId);
         }
+        
+        // Log token data for debugging (remove in production)
+        console.log('Token decoded:', tokenData);
+        console.log('Customer ID:', customerId);
+        console.log('User ID:', userId);
         
         // Redirect to dashboard
         navigate('/');

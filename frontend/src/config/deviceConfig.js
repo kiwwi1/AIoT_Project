@@ -46,3 +46,41 @@ export const setDeviceId = (deviceId) => {
   localStorage.setItem('deviceId', deviceId);
 };
 
+// Helper function để lấy customerId từ token hoặc localStorage
+export const getCustomerId = () => {
+  // First try to get from localStorage (saved during login)
+  const savedCustomerId = localStorage.getItem('customerId');
+  if (savedCustomerId) {
+    return savedCustomerId;
+  }
+  
+  // If not found, try to decode from token
+  // Dynamic import to avoid circular dependency
+  import('../utils/tokenUtils').then(({ getCustomerIdFromToken }) => {
+    const customerId = getCustomerIdFromToken();
+    if (customerId) {
+      localStorage.setItem('customerId', customerId);
+    }
+  });
+  
+  // For synchronous access, try to decode directly
+  try {
+    const token = localStorage.getItem('token');
+    if (token) {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const customerId = payload.customerId || payload.customer_id || null;
+        if (customerId) {
+          localStorage.setItem('customerId', customerId);
+          return customerId;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error getting customerId:', error);
+  }
+  
+  return null;
+};
+
