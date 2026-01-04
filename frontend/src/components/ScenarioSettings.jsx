@@ -1,108 +1,168 @@
 import { useState, useEffect } from 'react';
-import { scenarioAPI } from '../services/api';
+import { deviceAPI, sensorAPI } from '../services/api';
 import { DEVICE_CONFIG, getDeviceId } from '../config/deviceConfig';
 
 const ScenarioSettings = () => {
-  const [thresholds, setThresholds] = useState({
-    soilMoistureMin: 30,
-    soilMoistureMax: 80,
-    temperatureMin: 18,
-    temperatureMax: 30,
-    humidityMin: 40,
-    humidityMax: 80,
-  });
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(true);
   const [message, setMessage] = useState('');
+  const [currentDeviceId, setCurrentDeviceId] = useState(null);
+  
+  // Configuration state
+  const [config, setConfig] = useState({
+    soil_threshold_low: '',
+    soil_threshold_high: '',
+    temp_threshold_low: '',
+    temp_threshold_high: '',
+  });
 
   useEffect(() => {
-    fetchThresholds();
+    const deviceId = getDeviceId();
+    if (deviceId) {
+      setCurrentDeviceId(deviceId);
+      // Load from localStorage first, then fetch from telemetry
+      loadConfigFromStorage();
+      fetchConfigFromTelemetry(deviceId);
+    }
   }, []);
 
-  const fetchThresholds = async () => {
+  // Load config from localStorage
+  const loadConfigFromStorage = () => {
     try {
-      setLoading(true);
-      const deviceId = getDeviceId();
-      const entityType = DEVICE_CONFIG.entityType;
-      
-      const response = await scenarioAPI.getThresholds(entityType, deviceId);
-      
-      if (response.data) {
-        // ThingsBoard returns attributes as an object
-        const attrs = response.data;
-        setThresholds({
-          soilMoistureMin: attrs.soilMoistureMin || 30,
-          soilMoistureMax: attrs.soilMoistureMax || 80,
-          temperatureMin: attrs.temperatureMin || 18,
-          temperatureMax: attrs.temperatureMax || 30,
-          humidityMin: attrs.humidityMin || 40,
-          humidityMax: attrs.humidityMax || 80,
-        });
+      const savedConfig = localStorage.getItem('deviceConfig');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        setConfig(prev => ({
+          ...prev,
+          ...parsed
+        }));
       }
     } catch (error) {
-      console.error('Error fetching thresholds:', error);
-      // Keep default values
-    } finally {
-      setLoading(false);
+      console.error('Error loading config from storage:', error);
     }
   };
 
-  const handleInputChange = (field, value) => {
-    setThresholds(prev => ({
-      ...prev,
-      [field]: Number(value),
-    }));
+  // Save config to localStorage
+  const saveConfigToStorage = (configToSave) => {
+    try {
+      localStorage.setItem('deviceConfig', JSON.stringify(configToSave));
+    } catch (error) {
+      console.error('Error saving config to storage:', error);
+    }
   };
 
-  const handleSave = async () => {
+  // Fetch config values from telemetry
+  const fetchConfigFromTelemetry = async (deviceId) => {
     try {
-      setSaving(true);
-      setMessage('');
-      const deviceId = getDeviceId();
+      setLoadingConfig(true);
       const entityType = DEVICE_CONFIG.entityType;
       
-      await scenarioAPI.updateThresholds(entityType, deviceId, thresholds);
-      setMessage('Đã lưu cài đặt kịch bản thành công!');
+      // Get config values from telemetry keys
+      const keys = ['soil_threshold_low', 'soil_threshold_high', 'temp_threshold_low', 'temp_threshold_high'];
+      const response = await sensorAPI.getLatestTelemetry(entityType, deviceId, keys);
+      const data = response.data || {};
+      
+      console.log('Fetched config from telemetry:', data);
+      
+      // Extract values from telemetry response
+      // Format: { "soil_threshold_low": [{ "ts": ..., "value": "30" }], ... }
+      // Use current config as fallback (which may have been loaded from localStorage)
+      setConfig(prev => {
+        const getValue = (telemetryValue, prevValue) => {
+          if (telemetryValue !== undefined && telemetryValue !== null) {
+            const parsed = parseFloat(telemetryValue);
+            return isNaN(parsed) ? prevValue : parsed;
+          }
+          return prevValue;
+        };
+        
+        const newConfig = {
+          soil_threshold_low: getValue(data.soil_threshold_low?.[0]?.value, prev.soil_threshold_low),
+          soil_threshold_high: getValue(data.soil_threshold_high?.[0]?.value, prev.soil_threshold_high),
+          temp_threshold_low: getValue(data.temp_threshold_low?.[0]?.value, prev.temp_threshold_low),
+          temp_threshold_high: getValue(data.temp_threshold_high?.[0]?.value, prev.temp_threshold_high),
+        };
+        
+        // Save to localStorage if we got values from telemetry
+        if (data.soil_threshold_low?.[0]?.value !== undefined || 
+            data.soil_threshold_high?.[0]?.value !== undefined ||
+            data.temp_threshold_low?.[0]?.value !== undefined ||
+            data.temp_threshold_high?.[0]?.value !== undefined) {
+          saveConfigToStorage(newConfig);
+        }
+        
+        return newConfig;
+      });
     } catch (error) {
-      console.error('Error saving thresholds:', error);
-      setMessage('Lỗi khi lưu cài đặt');
+      console.error('Error fetching config from telemetry:', error);
+      // Keep values from localStorage or default if fetch fails
     } finally {
-      setSaving(false);
-      setTimeout(() => setMessage(''), 3000);
+      setLoadingConfig(false);
     }
   };
 
-  const handleReset = () => {
-    setThresholds({
-      soilMoistureMin: 30,
-      soilMoistureMax: 80,
-      temperatureMin: 18,
-      temperatureMax: 30,
-      humidityMin: 40,
-      humidityMax: 80,
-    });
+  // Handle RPC: updateConfig
+  const handleUpdateConfig = async () => {
+    try {
+      setLoading(true);
+      setMessage('');
+      const deviceId = currentDeviceId || getDeviceId();
+      if (!deviceId) {
+        setMessage('Không tìm thấy deviceId. Vui lòng tải lại trang.');
+        setLoading(false);
+        return;
+      }
+
+      // Validate that all values are provided
+      const soilLow = parseFloat(config.soil_threshold_low);
+      const soilHigh = parseFloat(config.soil_threshold_high);
+      const tempLow = parseFloat(config.temp_threshold_low);
+      const tempHigh = parseFloat(config.temp_threshold_high);
+
+      if (isNaN(soilLow) || isNaN(soilHigh) || isNaN(tempLow) || isNaN(tempHigh)) {
+        setMessage('Vui lòng nhập đầy đủ các giá trị ngưỡng.');
+        setLoading(false);
+        return;
+      }
+
+      const method = 'updateConfig';
+      const params = {
+        soil_low: soilLow,
+        soil_high: soilHigh,
+        temp_low: tempLow,
+        temp_high: tempHigh,
+      };
+
+      await deviceAPI.sendRPC(deviceId, method, params, false, 5000);
+      
+      // Save to localStorage after successful update
+      saveConfigToStorage({
+        soil_threshold_low: soilLow,
+        soil_threshold_high: soilHigh,
+        temp_threshold_low: tempLow,
+        temp_threshold_high: tempHigh,
+      });
+      
+      setMessage('Cấu hình đã được cập nhật và lưu thành công!');
+    } catch (error) {
+      console.error('Error sending updateConfig RPC:', error);
+      setMessage('Lỗi khi cập nhật cấu hình: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMessage(''), 5000);
+    }
+  };
+
+  const handleConfigChange = (field, value) => {
+    setConfig(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-800">Cài đặt kịch bản</h1>
-        <div className="flex gap-3">
-          <button
-            onClick={handleReset}
-            className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
-          >
-            Đặt lại
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
-          >
-            {saving ? 'Đang lưu...' : 'Lưu cài đặt'}
-          </button>
-        </div>
-      </div>
+      <h1 className="text-3xl font-bold text-gray-800">Cài đặt Kịch bản</h1>
 
       {message && (
         <div className={`p-4 rounded-lg ${
@@ -114,190 +174,95 @@ const ScenarioSettings = () => {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {/* Soil Moisture Thresholds */}
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-xl font-semibold mb-4 text-gray-800 flex items-center">
-              <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
-              Ngưỡng độ ẩm đất
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Khi độ ẩm đất vượt ngoài khoảng này, hệ thống sẽ tự động tưới nước hoặc cảnh báo.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ngưỡng dưới (Tối thiểu) - %
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={thresholds.soilMoistureMin}
-                  onChange={(e) => handleInputChange('soilMoistureMin', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Nếu độ ẩm đất &lt; {thresholds.soilMoistureMin}%, máy bơm sẽ tự động bật
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ngưỡng trên (Tối đa) - %
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={thresholds.soilMoistureMax}
-                  onChange={(e) => handleInputChange('soilMoistureMax', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Nếu độ ẩm đất &gt; {thresholds.soilMoistureMax}%, hệ thống sẽ cảnh báo
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-              <p className="text-sm text-blue-800">
-                <strong>Khoảng hoạt động:</strong> {thresholds.soilMoistureMin}% - {thresholds.soilMoistureMax}%
-              </p>
-            </div>
+      {/* Configuration Update */}
+      <div className="bg-white p-6 rounded-lg shadow-md border-2 border-gray-200">
+        <h2 className="text-2xl font-semibold text-gray-800 mb-4">Cập nhật Cấu hình</h2>
+        <p className="text-sm text-gray-600 mb-6">Gửi lệnh RPC updateConfig để cập nhật ngưỡng cảm biến</p>
+        
+        {loadingConfig ? (
+          <div className="flex justify-center items-center py-8">
+            <div className="text-gray-500">Đang tải cấu hình từ thiết bị...</div>
           </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Độ ẩm đất thấp (soil_threshold_low)
+                </label>
+                <input
+                  type="number"
+                  value={config.soil_threshold_low}
+                  onChange={(e) => handleConfigChange('soil_threshold_low', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="20"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Độ ẩm đất cao (soil_threshold_high)
+                </label>
+                <input
+                  type="number"
+                  value={config.soil_threshold_high}
+                  onChange={(e) => handleConfigChange('soil_threshold_high', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="80"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nhiệt độ thấp (temp_threshold_low)
+                </label>
+                <input
+                  type="number"
+                  value={config.temp_threshold_low}
+                  onChange={(e) => handleConfigChange('temp_threshold_low', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="18"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nhiệt độ cao (temp_threshold_high)
+                </label>
+                <input
+                  type="number"
+                  value={config.temp_threshold_high}
+                  onChange={(e) => handleConfigChange('temp_threshold_high', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="30"
+                />
+              </div>
+            </div>
+          </>
+        )}
 
-          {/* Temperature Thresholds */}
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-xl font-semibold mb-4 text-gray-800 flex items-center">
-              <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
-              Ngưỡng nhiệt độ không khí
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Khi nhiệt độ vượt ngoài khoảng này, hệ thống sẽ tự động bật đèn sưởi hoặc cảnh báo.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ngưỡng dưới (Tối thiểu) - °C
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
-                  step="0.1"
-                  value={thresholds.temperatureMin}
-                  onChange={(e) => handleInputChange('temperatureMin', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Nếu nhiệt độ &lt; {thresholds.temperatureMin}°C, đèn sưởi sẽ tự động bật
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ngưỡng trên (Tối đa) - °C
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
-                  step="0.1"
-                  value={thresholds.temperatureMax}
-                  onChange={(e) => handleInputChange('temperatureMax', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Nếu nhiệt độ &gt; {thresholds.temperatureMax}°C, hệ thống sẽ cảnh báo
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 p-3 bg-green-50 rounded-lg">
-              <p className="text-sm text-green-800">
-                <strong>Khoảng hoạt động:</strong> {thresholds.temperatureMin}°C - {thresholds.temperatureMax}°C
-              </p>
-            </div>
-          </div>
-
-          {/* Humidity Thresholds */}
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-xl font-semibold mb-4 text-gray-800 flex items-center">
-              <span className="w-3 h-3 bg-purple-500 rounded-full mr-2"></span>
-              Ngưỡng độ ẩm không khí
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Khi độ ẩm không khí vượt ngoài khoảng này, hệ thống sẽ cảnh báo.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ngưỡng dưới (Tối thiểu) - %
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={thresholds.humidityMin}
-                  onChange={(e) => handleInputChange('humidityMin', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Nếu độ ẩm &lt; {thresholds.humidityMin}%, hệ thống sẽ cảnh báo
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Ngưỡng trên (Tối đa) - %
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={thresholds.humidityMax}
-                  onChange={(e) => handleInputChange('humidityMax', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Nếu độ ẩm &gt; {thresholds.humidityMax}%, hệ thống sẽ cảnh báo
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 p-3 bg-purple-50 rounded-lg">
-              <p className="text-sm text-purple-800">
-                <strong>Khoảng hoạt động:</strong> {thresholds.humidityMin}% - {thresholds.humidityMax}%
-              </p>
-            </div>
-          </div>
-
-          {/* Alert Information */}
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
-            <div className="flex">
-              <div className="shrink-0">
-                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        {!loadingConfig && (
+          <button
+            onClick={handleUpdateConfig}
+            disabled={loading}
+            className={`w-full py-3 px-4 rounded-lg font-semibold transition-all bg-green-500 text-white hover:bg-green-600 active:bg-green-700 ${
+              loading ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            {loading ? (
+              <span className="flex items-center justify-center">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-yellow-700">
-                  <strong>Lưu ý:</strong> Khi giá trị cảm biến vượt ngoài các ngưỡng đã cài đặt, hệ thống sẽ:
-                </p>
-                <ul className="mt-2 text-sm text-yellow-700 list-disc list-inside">
-                  <li>Tự động kích hoạt thiết bị (máy bơm hoặc đèn sưởi) nếu cần</li>
-                  <li>Gửi thông báo cảnh báo về sự bất thường của môi trường</li>
-                  <li>Ghi lại log để theo dõi và phân tích</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+                Đang gửi...
+              </span>
+            ) : (
+              'Cập nhật Cấu hình (updateConfig)'
+            )}
+          </button>
+        )}
+
+      </div>
     </div>
   );
 };
 
 export default ScenarioSettings;
-
-

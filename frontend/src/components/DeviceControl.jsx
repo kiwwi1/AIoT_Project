@@ -5,8 +5,11 @@ import { DEVICE_CONFIG, getDeviceId, setDeviceId } from '../config/deviceConfig'
 const DeviceControl = () => {
   const [deviceStatus, setDeviceStatus] = useState({
     pump: false,
+    pumpMode: 'MANUAL', // 'AUTO' hoặc 'MANUAL'
+    pumpStatus: 'OFF', // 'ON' hoặc 'OFF'
     autoMode: false,
     lampMode: 'MANUAL', // 'AUTO' hoặc 'MANUAL'
+    lampStatus: 'OFF', // 'ON' hoặc 'OFF'
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -79,28 +82,61 @@ const DeviceControl = () => {
       
       const entityType = DEVICE_CONFIG.entityType;
       
-      // Get device status from telemetry (pump_status, lamp_mode)
-      // Response format: { "pump_status": [{ "ts": ..., "value": "ON" }], "lamp_mode": [{ "ts": ..., "value": "AUTO" }], ... }
+      // Get device status from telemetry (pump_mode, pump_status, lamp_mode, lamp_status)
+      // Response format: { "pump_mode": [{ "ts": ..., "value": "AUTO" }], "pump_status": [{ "ts": ..., "value": "ON" }], ... }
       const keys = [
-        DEVICE_CONFIG.telemetryKeys.pumpStatus,
+        DEVICE_CONFIG.telemetryKeys.pumpMode, // pump_mode: "AUTO" hoặc "MANUAL"
+        DEVICE_CONFIG.telemetryKeys.pumpStatus, // pump_status: "ON" hoặc "OFF"
         DEVICE_CONFIG.telemetryKeys.lampMode, // lamp_mode: "AUTO" hoặc "MANUAL"
+        DEVICE_CONFIG.telemetryKeys.lampStatus, // lamp_status: "ON" hoặc "OFF"
       ];
       
       const response = await sensorAPI.getLatestTelemetry(entityType, deviceId, keys);
       const data = response.data || {};
       
       // Extract status values
-      const pumpValue = data[DEVICE_CONFIG.telemetryKeys.pumpStatus]?.[0]?.value;
+      const pumpModeValue = data[DEVICE_CONFIG.telemetryKeys.pumpMode]?.[0]?.value;
+      const pumpStatusValue = data[DEVICE_CONFIG.telemetryKeys.pumpStatus]?.[0]?.value;
       const lampModeValue = data[DEVICE_CONFIG.telemetryKeys.lampMode]?.[0]?.value;
+      const lampStatusValue = data[DEVICE_CONFIG.telemetryKeys.lampStatus]?.[0]?.value;
       
-      // lamp_mode: "AUTO" hoặc "MANUAL" (có thể viết hoa hoặc thường)
-      const isAutoMode = lampModeValue === 'AUTO' || lampModeValue === 'auto' || lampModeValue === 'Auto';
-      const mode = isAutoMode ? 'AUTO' : 'MANUAL';
+      // Debug logging
+      console.log('Telemetry data:', data);
+      console.log('pump_mode raw value:', pumpModeValue);
+      console.log('pump_status raw value:', pumpStatusValue);
+      console.log('lamp_mode raw value:', lampModeValue);
+      console.log('lamp_status raw value:', lampStatusValue);
+      
+      // pump_mode: "AUTO" hoặc "MANUAL" (có thể viết hoa hoặc thường, hoặc là string)
+      const pumpModeStr = String(pumpModeValue || '').trim().toUpperCase();
+      const isPumpAuto = pumpModeStr === 'AUTO';
+      const pumpMode = isPumpAuto ? 'AUTO' : 'MANUAL';
+      
+      // pump_status: "ON" hoặc "OFF" (có thể viết hoa hoặc thường, hoặc là boolean)
+      const pumpStatusStr = String(pumpStatusValue || '').trim().toUpperCase();
+      const isPumpOn = pumpStatusStr === 'ON' || pumpStatusValue === true || pumpStatusValue === 1;
+      const pumpStatus = isPumpOn ? 'ON' : 'OFF';
+      
+      // lamp_mode: "AUTO" hoặc "MANUAL" (có thể viết hoa hoặc thường, hoặc là string)
+      const lampModeStr = String(lampModeValue || '').trim().toUpperCase();
+      const isAutoMode = lampModeStr === 'AUTO';
+      const lampMode = isAutoMode ? 'AUTO' : 'MANUAL';
+      
+      // lamp_status: "ON" hoặc "OFF" (có thể viết hoa hoặc thường, hoặc là boolean)
+      const lampStatusStr = String(lampStatusValue || '').trim().toUpperCase();
+      const isLampOn = lampStatusStr === 'ON' || lampStatusValue === true || lampStatusValue === 1;
+      const lampStatus = isLampOn ? 'ON' : 'OFF';
+      
+      console.log('Parsed pumpMode:', pumpMode, 'pumpStatus:', pumpStatus, 'isPumpAuto:', isPumpAuto);
+      console.log('Parsed lampMode:', lampMode, 'lampStatus:', lampStatus, 'isAutoMode:', isAutoMode);
       
       setDeviceStatus({
-        pump: pumpValue === 'ON' || pumpValue === 'on' || pumpValue === true || pumpValue === 1,
+        pump: isPumpAuto,
+        pumpMode: pumpMode,
+        pumpStatus: pumpStatus,
         autoMode: isAutoMode,
-        lampMode: mode,
+        lampMode: lampMode,
+        lampStatus: lampStatus,
       });
     } catch (error) {
       console.error('Error fetching device status:', error);
@@ -109,32 +145,53 @@ const DeviceControl = () => {
     }
   };
 
-  const handlePumpControl = async (action) => {
+  // Control pump using setPump method - toggle (chỉ gửi state: true)
+  const handlePumpControl = async () => {
     try {
       setLoading(true);
       setMessage('');
       const deviceId = currentDeviceId || getDeviceId();
+      
+      console.log('handlePumpControl called, deviceId:', deviceId);
+      
       if (!deviceId) {
         setMessage('Không tìm thấy deviceId. Vui lòng tải lại trang.');
+        setLoading(false);
         return;
       }
       
-      const method = DEVICE_CONFIG.rpcMethods.setPump;
-      const params = { action }; // { action: 'on' } or { action: 'off' }
+      const method = 'setPump';
+      const params = { state: true }; // Chỉ gửi state: true để toggle chế độ máy bơm
       
-      await deviceAPI.sendRPC(deviceId, method, params, false, 5000);
-      setMessage(`Máy bơm đã được ${action === 'on' ? 'BẬT' : 'TẮT'}`);
+      console.log('Sending RPC:', { deviceId, method, params });
       
-      // Wait a bit then refresh status
+      // Use the correct RPC endpoint: /api/rpc/oneway/{deviceId}
+      // with payload: { method, params, persistent: false, timeout: 5000 }
+      const response = await deviceAPI.sendRPC(deviceId, method, params, false, 5000);
+      
+      console.log('RPC response:', response);
+      setMessage('Đã gửi lệnh toggle chế độ máy bơm');
+      
+      // Refresh status immediately and then again after delay to ensure update
+      fetchDeviceStatus();
       setTimeout(() => {
         fetchDeviceStatus();
-      }, 1000);
+      }, 2000);
+      setTimeout(() => {
+        fetchDeviceStatus();
+      }, 4000);
     } catch (error) {
       console.error('Error controlling pump:', error);
-      setMessage('Lỗi khi điều khiển máy bơm: ' + (error.response?.data?.message || error.message));
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      setMessage('Lỗi khi điều khiển máy bơm: ' + (error.response?.data?.message || error.message || 'Unknown error'));
     } finally {
       setLoading(false);
-      setTimeout(() => setMessage(''), 3000);
+      setTimeout(() => setMessage(''), 5000);
     }
   };
 
@@ -144,29 +201,47 @@ const DeviceControl = () => {
       setLoading(true);
       setMessage('');
       const deviceId = currentDeviceId || getDeviceId();
+      
+      console.log('handleAutoModeControl called, deviceId:', deviceId);
+      
       if (!deviceId) {
         setMessage('Không tìm thấy deviceId. Vui lòng tải lại trang.');
+        setLoading(false);
         return;
       }
       
       const method = 'setLamp';
       const params = { state: true }; // Chỉ gửi state: true để toggle chế độ tự động
       
+      console.log('Sending RPC:', { deviceId, method, params });
+      
       // Use the correct RPC endpoint: /api/rpc/oneway/{deviceId}
       // with payload: { method, params, persistent: false, timeout: 5000 }
-      await deviceAPI.sendRPC(deviceId, method, params, false, 5000);
+      const response = await deviceAPI.sendRPC(deviceId, method, params, false, 5000);
+      
+      console.log('RPC response:', response);
       setMessage('Đã gửi lệnh toggle chế độ tự động');
       
-      // Wait a bit then refresh status
+      // Refresh status immediately and then again after delay to ensure update
+      fetchDeviceStatus();
       setTimeout(() => {
         fetchDeviceStatus();
-      }, 1000);
+      }, 2000);
+      setTimeout(() => {
+        fetchDeviceStatus();
+      }, 4000);
     } catch (error) {
       console.error('Error controlling auto mode:', error);
-      setMessage('Lỗi khi điều khiển chế độ tự động: ' + (error.response?.data?.message || error.message));
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        statusText: error.response?.statusText
+      });
+      setMessage('Lỗi khi điều khiển chế độ tự động: ' + (error.response?.data?.message || error.message || 'Unknown error'));
     } finally {
       setLoading(false);
-      setTimeout(() => setMessage(''), 3000);
+      setTimeout(() => setMessage(''), 5000);
     }
   };
 
@@ -190,48 +265,54 @@ const DeviceControl = () => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-2xl font-semibold text-gray-800">Máy bơm nước</h2>
-              <p className="text-sm text-gray-600 mt-1">Điều khiển máy bơm tưới cây</p>
+              <p className="text-sm text-gray-600 mt-1">Bật/tắt chế độ tự động</p>
             </div>
-            <div className={`w-16 h-16 rounded-full flex items-center justify-center ${
-              deviceStatus.pump ? 'bg-green-500' : 'bg-gray-300'
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
+              deviceStatus.pump ? 'bg-green-500' : 'bg-blue-500'
             }`}>
-              <span className="text-white font-bold text-xl">
-                {deviceStatus.pump ? 'ON' : 'OFF'}
+              <span className="text-white font-bold text-sm text-center px-1">
+                {deviceStatus.pumpMode}
               </span>
             </div>
           </div>
           
-          <div className="mt-6 space-y-3">
+          <div className="mt-6">
             <button
-              onClick={() => handlePumpControl('on')}
-              disabled={loading || deviceStatus.pump}
-              className={`w-full py-3 px-4 rounded-lg font-semibold transition-all ${
+              onClick={handlePumpControl}
+              disabled={loading}
+              className={`w-full py-4 px-4 rounded-lg font-semibold transition-all ${
                 deviceStatus.pump
-                  ? 'bg-green-500 text-white cursor-not-allowed'
-                  : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'
+                  ? 'bg-green-500 text-white hover:bg-green-600 active:bg-green-700'
+                  : 'bg-gray-400 text-white hover:bg-gray-500 active:bg-gray-600'
               } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              {deviceStatus.pump ? 'Đang BẬT' : 'BẬT máy bơm'}
-            </button>
-            <button
-              onClick={() => handlePumpControl('off')}
-              disabled={loading || !deviceStatus.pump}
-              className={`w-full py-3 px-4 rounded-lg font-semibold transition-all ${
-                !deviceStatus.pump
-                  ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                  : 'bg-red-500 text-white hover:bg-red-600 active:bg-red-700'
-              } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              {!deviceStatus.pump ? 'Đang TẮT' : 'TẮT máy bơm'}
+              {loading ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Đang xử lý...
+                </span>
+              ) : (
+                deviceStatus.pump ? 'TẮT chế độ tự động' : 'BẬT chế độ tự động'
+              )}
             </button>
           </div>
 
           <div className="mt-4 p-3 bg-gray-50 rounded-lg">
             <p className="text-xs text-gray-600">
-              <strong>Trạng thái:</strong> {deviceStatus.pump ? 'Đang hoạt động' : 'Đã tắt'}
+              <strong>Chế độ:</strong> <span className="font-semibold">{deviceStatus.pumpMode}</span>
             </p>
             <p className="text-xs text-gray-600 mt-1">
-              <strong>Chức năng:</strong> Tưới nước tự động khi độ ẩm đất thấp
+              <strong>Trạng thái:</strong> <span className={`font-semibold ${deviceStatus.pumpStatus === 'ON' ? 'text-green-600' : 'text-gray-600'}`}>
+                {deviceStatus.pumpStatus === 'ON' ? 'BẬT' : 'TẮT'}
+              </span>
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              <strong>Chức năng:</strong> {deviceStatus.pump 
+                ? 'Hệ thống tự động điều khiển máy bơm theo ngưỡng đã cài đặt'
+                : 'Điều khiển máy bơm thủ công'}
             </p>
           </div>
         </div>
@@ -278,7 +359,12 @@ const DeviceControl = () => {
 
           <div className="mt-4 p-3 bg-gray-50 rounded-lg">
             <p className="text-xs text-gray-600">
-              <strong>Chế độ hiện tại:</strong> <span className="font-semibold">{deviceStatus.lampMode}</span>
+              <strong>Chế độ:</strong> <span className="font-semibold">{deviceStatus.lampMode}</span>
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              <strong>Trạng thái:</strong> <span className={`font-semibold ${deviceStatus.lampStatus === 'ON' ? 'text-green-600' : 'text-gray-600'}`}>
+                {deviceStatus.lampStatus === 'ON' ? 'BẬT' : 'TẮT'}
+              </span>
             </p>
             <p className="text-xs text-gray-600 mt-1">
               <strong>Chức năng:</strong> {deviceStatus.autoMode 
@@ -292,22 +378,36 @@ const DeviceControl = () => {
       {/* Device Status Summary */}
       <div className="bg-white p-6 rounded-lg shadow-md">
         <h2 className="text-xl font-semibold mb-4 text-gray-800">Tóm tắt trạng thái thiết bị</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-4 border rounded-lg">
             <p className="text-sm text-gray-600">Máy bơm nước</p>
-            <p className={`text-2xl font-bold mt-2 ${
-              deviceStatus.pump ? 'text-green-600' : 'text-gray-400'
-            }`}>
-              {deviceStatus.pump ? 'BẬT' : 'TẮT'}
-            </p>
+            <div className="mt-2 space-y-1">
+              <p className={`text-2xl font-bold ${
+                deviceStatus.pump ? 'text-green-600' : 'text-blue-600'
+              }`}>
+                {deviceStatus.pumpMode}
+              </p>
+              <p className={`text-sm font-medium ${
+                deviceStatus.pumpStatus === 'ON' ? 'text-green-600' : 'text-gray-500'
+              }`}>
+                {deviceStatus.pumpStatus === 'ON' ? '● BẬT' : '○ TẮT'}
+              </p>
+            </div>
           </div>
           <div className="p-4 border rounded-lg">
-            <p className="text-sm text-gray-600">Chế độ</p>
-            <p className={`text-2xl font-bold mt-2 ${
-              deviceStatus.autoMode ? 'text-green-600' : 'text-blue-600'
-            }`}>
-              {deviceStatus.lampMode}
-            </p>
+            <p className="text-sm text-gray-600">Đèn</p>
+            <div className="mt-2 space-y-1">
+              <p className={`text-2xl font-bold ${
+                deviceStatus.autoMode ? 'text-green-600' : 'text-blue-600'
+              }`}>
+                {deviceStatus.lampMode}
+              </p>
+              <p className={`text-sm font-medium ${
+                deviceStatus.lampStatus === 'ON' ? 'text-green-600' : 'text-gray-500'
+              }`}>
+                {deviceStatus.lampStatus === 'ON' ? '● BẬT' : '○ TẮT'}
+              </p>
+            </div>
           </div>
         </div>
       </div>

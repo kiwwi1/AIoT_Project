@@ -16,6 +16,7 @@ export const DEVICE_CONFIG = {
     airTemperature: 'temperature',      // Nhiệt độ không khí
     airHumidity: 'humidity',             // Độ ẩm không khí
     pumpStatus: 'pump_status',           // Trạng thái máy bơm
+    pumpMode: 'pump_mode',               // Chế độ máy bơm (AUTO/MANUAL)
     lampStatus: 'lamp_status',           // Trạng thái đèn (ON/OFF)
     lampMode: 'lamp_mode',               // Chế độ đèn (AUTO/MANUAL)
     temperaturePrediction: 'temperaturePrediction', // Dự báo nhiệt độ
