@@ -9,12 +9,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState(7); // days
   const [showFullTable, setShowFullTable] = useState(false); // Hiển thị full table hay chỉ 5 gần nhất
-
-  useEffect(() => {
-    fetchSensorData();
-    const interval = setInterval(fetchSensorData, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
-  }, [timeRange]);
+  const [lastResetTime, setLastResetTime] = useState(Date.now()); // Thời gian reset cuối cùng
 
   const fetchSensorData = async () => {
     try {
@@ -42,7 +37,7 @@ const Dashboard = () => {
         startTs,
         endTs,
         3600000 // 1 hour interval
-      );
+      );  
 
       // Process latest data
       if (latestResponse.data) {
@@ -53,20 +48,52 @@ const Dashboard = () => {
       // Process history data
       if (historyResponse.data) {
         const processed = processTelemetryHistory(historyResponse.data, keys);
-        setSensorData(processed);
+        // Chỉ update nếu có dữ liệu mới, không reset nếu dữ liệu rỗng
+        if (processed.length > 0) {
+          setSensorData(processed);
+        }
+        // Nếu dữ liệu rỗng, giữ nguyên dữ liệu cũ thay vì reset
       } else {
-        setSensorData(generateMockData());
+        // Chỉ set mock data nếu chưa có dữ liệu nào
+        setSensorData(prevData => prevData.length === 0 ? generateMockData() : prevData);
       }
     } catch (error) {
       console.error('Error fetching sensor data:', error);
-      // Mock data for development
-      const mockData = generateMockData();
-      setSensorData(mockData);
-      setLatestData(mockData.length > 0 ? mockData[mockData.length - 1] : null);
+      // Chỉ set mock data nếu chưa có dữ liệu nào, không reset dữ liệu hiện có
+      setSensorData(prevData => {
+        if (prevData.length === 0) {
+          const mockData = generateMockData();
+          setLatestData(mockData.length > 0 ? mockData[mockData.length - 1] : null);
+          return mockData;
+        }
+        return prevData; // Giữ nguyên dữ liệu cũ
+      });
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchSensorData();
+    const interval = setInterval(fetchSensorData, 60000); // Refresh every 60 seconds
+    return () => clearInterval(interval);
+  }, [timeRange]);
+
+  // Reset biểu đồ sau mỗi 1 giờ (3600000 milliseconds)
+  // Sử dụng useEffect riêng để không bị ảnh hưởng bởi fetch
+  useEffect(() => {
+    // Set interval để reset sau đúng 1 giờ, không phụ thuộc vào fetch
+    const resetInterval = setInterval(() => {
+      console.log('Resetting charts after 1 hour...');
+      // Chỉ reset dữ liệu, không fetch ngay lập tức
+      // Dữ liệu sẽ được fetch tự động bởi useEffect fetch (mỗi 60s)
+      setSensorData([]);
+      setLatestData(null);
+      setLastResetTime(Date.now());
+    }, 3600000); // Reset mỗi 1 giờ (3600000 milliseconds)
+
+    return () => clearInterval(resetInterval);
+  }, []); // Chỉ chạy một lần khi component mount, không phụ thuộc vào fetch
 
   // Process latest telemetry data from ThingsBoard format
   // Values are strings from API: "13", "66", "100"

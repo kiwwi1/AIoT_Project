@@ -38,7 +38,8 @@ const TemperaturePrediction = () => {
 
   // Process predictions from telemetry data
   const processPredictions = (data) => {
-    const predictionKey = DEVICE_CONFIG.telemetryKeys.temperaturePrediction;
+    // Sử dụng key 'prediction_temp' từ API response
+    const predictionKey = 'prediction_temp';
     const predictionData = data[predictionKey] || [];
     
     // Also get actual temperature for comparison
@@ -50,6 +51,7 @@ const TemperaturePrediction = () => {
     
     // Process prediction data (assuming it contains future predictions)
     predictionData.forEach((point, index) => {
+      // Convert timestamp from milliseconds to Date
       const date = new Date(point.ts);
       const actualPoint = actualData.find(p => Math.abs(p.ts - point.ts) < 3600000); // Within 1 hour
       

@@ -167,24 +167,28 @@ export const scenarioAPI = {
 
 // API functions for predictions (sử dụng Telemetry)
 export const predictionAPI = {
-  // Get temperature predictions (giả sử có key 'temperaturePrediction' trong telemetry)
-  getPredictions: (entityType, entityId) =>
-    api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
-      params: { keys: 'temperaturePrediction', useStrictDataTypes: false }
-    }),
+  // Get temperature predictions (sử dụng key 'prediction_temp' từ API)
+  getPredictions: (entityType, entityId, keys = 'prediction_temp') => {
+    const keysParam = Array.isArray(keys) ? keys.join(',') : keys;
+    return api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
+      params: { keys: keysParam, useStrictDataTypes: false }
+    });
+  },
   
   // Get prediction history
-  getPredictionHistory: (entityType, entityId, startTs, endTs) =>
-    api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
+  getPredictionHistory: (entityType, entityId, startTs, endTs, keys = 'prediction_temp') => {
+    const keysParam = Array.isArray(keys) ? keys.join(',') : keys;
+    return api.get(`/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
       params: { 
-        keys: 'temperaturePrediction',
+        keys: keysParam,
         startTs,
         endTs,
         interval: 3600000,
         intervalType: 'MILLISECONDS',
         useStrictDataTypes: false
       }
-    }),
+    });
+  },
 };
 
 // API functions for logs (Audit Log)
